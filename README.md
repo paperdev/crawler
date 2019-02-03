@@ -1,2 +1,2 @@
 # crawler
-python crawler
+python crawler for mac os
