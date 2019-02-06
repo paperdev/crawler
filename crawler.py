@@ -11,6 +11,7 @@ import os
 import json
 from urllib.request import Request
 from urllib.request import urlopen
+import concurrent.futures
 
 # chrome dirver directory
 CHROME_DIRVER = os.getcwd() + "/driver/chromedriver"
@@ -22,65 +23,75 @@ GOOGLE_IMAGE_SEARCH_PREFIX = "https://www.google.com/search?tbm=isch&q="
 # to avoid Forbidden issue
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36"
 
+# search key words
+SEARCH_KEY = "python lectures"
+# search count
+SEARCH_COUNT = 10
+IMAGES_PATH = SEARCH_KEY.replace(" ", "_")
+
+MAX_WORKERS = 5
+
 
 def main():
-    # search key words
-    search_key = "python lectures"
-    # search count
-    search_count = 3
-    images_path = search_key.replace(" ", "_")
+    if not os.path.exists(DOWNLOAD_PATH + IMAGES_PATH):
+        os.makedirs(DOWNLOAD_PATH + IMAGES_PATH)
 
-    if not os.path.exists(DOWNLOAD_PATH + images_path):
-        os.makedirs(DOWNLOAD_PATH + images_path)
-
-    url = GOOGLE_IMAGE_SEARCH_PREFIX + search_key
+    url = GOOGLE_IMAGE_SEARCH_PREFIX + SEARCH_KEY
 
     # set Chrome headless option
     chrome_options = Options()
     chrome_options.add_argument("--headless")
 
     # Chrome browser
-    driver = webdriver.Chrome(options=chrome_options, executable_path=CHROME_DIRVER)
-    driver.get(url)
+    with webdriver.Chrome(options=chrome_options, executable_path=CHROME_DIRVER) as driver:
+        try:
+            driver.get(url)
+            images = driver.find_elements_by_class_name("rg_meta")
+            print("Total images: {}".format(len(images)))
+        except Exception as e:
+            print("find_element_by_xpath error : {}".format(e))
+            driver.quit()
 
+        download_images(images)
+
+
+def save_images(request, file_name):
+    with urlopen(request) as raw:
+        raw_image = raw.read()
+        with open(DOWNLOAD_PATH + IMAGES_PATH + "/" + file_name, "wb") as file:
+            print("Downloading {}".format(file_name))
+            file.write(raw_image)
+
+
+def download_images(images):
     headers = {}
     headers["User-Agent"] = USER_AGENT
-    extensions = {"jpg", "jpeg", "png", "gif"}
     image_count = 0
     downloaded_images_count = 0
-
-    try:
-        images = driver.find_elements_by_class_name("rg_meta")
-        print("Total images: {}".format(len(images)))
-    except Exception as e:
-        print("find_element_by_xpath error : {}".format(e))
-        driver.quit()
 
     for image in images:
         image_count += 1
         image_url = json.loads(image.get_attribute("innerHTML"))["ou"]
-        image_type = json.loads(image.get_attribute("innerHTML"))["ity"]
         image_title = json.loads(image.get_attribute("innerHTML"))["pt"]
-        print("Downloading from {}".format(image_url))
+        image_type = json.loads(image.get_attribute("innerHTML"))["ity"]
+        if not image_type:
+            image_type = "jpg"
+        file_name = str(image_count) + "." + image_title + "." + image_type
+        # print("Image url : {}".format(image_url))
+
         try:
-            if image_type not in extensions:
-                continue
             request = Request(image_url, headers=headers)
-            raw_image = urlopen(request).read()
-            file_name = str(downloaded_images_count) + "." + image_title + "." + image_type
-            file = open(DOWNLOAD_PATH + images_path + "/" + file_name, "wb")
-            file.write(raw_image)
-            file.close()
-            downloaded_images_count += 1
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                executor.submit(save_images, request, file_name)
+                downloaded_images_count += 1
         except Exception as e:
             print("Download failed: {}".format(e))
-        finally:
-            print("Download finished.")
-        if downloaded_images_count >= search_count:
+
+        if downloaded_images_count >= SEARCH_COUNT:
             break
 
     print("Total downloaded: {}/{}".format(downloaded_images_count, image_count))
-    driver.quit()
 
 if __name__ == "__main__":
     main()
